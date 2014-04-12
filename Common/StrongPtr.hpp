@@ -1,5 +1,8 @@
 #pragma once
 
+template< typename KObjectT > class WeakPtr;
+
+
 template
     <
 
@@ -18,30 +21,55 @@ class StrongPtr
 public:
 
     StrongPtr():
-        _p(NULL)
+        p_( NULL ),
+        refCounter_( NULL )
     {
-
     }
 
     StrongPtr(KObjectT* p):
-        _p(NULL)
+        p_( NULL ),
+        refCounter_( NULL )
     {
         /**
 		 * Enables 'Strong<T> ptr = NULL;' syntax. Always initializes internal pointer to NULL
 		 * no matter what argument is passed. This prevents user from mistakes like:
 		 *  StrongPtr<T> ptr((T*)123);
 		 *  StrongPtr<T> ptr(new T()); 
-		 */        
-        Init(p);
+		 */
+        Init(p, NULL);
     }
 
     /**
     * Copy constructor implementation.
     */
-    StrongPtr( const StrongPtr & rhs )
-        : _p(NULL)
+    StrongPtr( const StrongPtr & rhs ):
+        p_( NULL ),
+        refCounter_( NULL )
     {
-        Init(rhs._p);
+        Init(rhs.p_, rhs.refCounter_);
+    }
+
+
+    /**
+    * Copy constructor implementation from WeakPtr,
+    * 
+    */
+    StrongPtr( const WeakPtr<KObjectT>& rhs ):
+        p_( NULL ),
+        refCounter_( NULL )
+    {
+        // ! This may be has exception in multi thread environment. 
+        // ! Because, there is no lock to guard the p_ release.
+        // ! User should use weak and strong correctly. 
+        // ! Should correct this code in future.
+
+        assert( 0 != rhs.refCounter_->GetStrongCount() );
+
+        if ( 0 != rhs.refCounter_->GetStrongCount() )
+        {
+            Init(rhs.p_, rhs.refCounter_);
+        }
+
     }
 
     /**
@@ -49,50 +77,97 @@ public:
     */
     ~StrongPtr()
     {
-        KObjectT* p = _p;
-        _p = NULL;
 
-        if ( NULL != p)
+        if ( NULL != refCounter_ )
         {
-            p->Release(TRUE);
+            if ( ( 0 == refCounter_->DecStrongCount()) &&
+                 ( 0 == refCounter_->GetWeakCount()))
+            {
+                delete refCounter_;
+                refCounter_ = NULL;
+            }
         }
+
+        if ( NULL != p_)
+        {
+            KObjectT* p = p_;
+            p_ = NULL;
+
+            p->Release();
+        }
+
     }
 
 
     KObjectT& operator*()
     {
-        return *_p;
+        return *p_;
     }
 
     const KObjectT& operator*() const
     {
-        return *_p;
+        return *p_;
     }
 
     KObjectT* operator ->()
     {
-        return _p;
+        return p_;
     }
 
     const KObjectT* operator ->() const
     {
-        return _p;
+        return p_;
     }
 
 
 private:
-    void Init(KObjectT * p)
+    void InitCounter()
     {
-        // Increment internal object's reference counter 
-        if ( NULL != p )
-        {
-            _p = p;
+        refCounter_ = new DualRefCounter( true );
+    }
 
-            // Increment external reference counter
-            _p->Addref(TRUE);
+    void ReleaseCounter()
+    {
+        if ( NULL != refCounter_ )
+        {
+            // Delete counter if there are no weak references to the object.
+            delete refCounter_;
+            refCounter_ = NULL;
         }
     }
 
+    void Init(KObjectT * p, DualRefCounter* refCounter)
+    {
+        if ( NULL != p )
+        {
+            // If object isn't null, we should inc object's ref and init daul refcount
+            p->Addref();
+            p_ = p;
+        }
+
+        if ( NULL != p_ )
+        {
+            assert( NULL == refCounter_ );
+            if (NULL != refCounter)
+            {
+                refCounter->IncStrongCount();
+                refCounter_ = refCounter;
+            }
+            else
+            {
+                refCounter_ = new DualRefCounter(TRUE);
+                assert( NULL != refCounter_ );
+            }
+        }
+
+    }
+
 private:
-    KObjectT* _p;
+
+    // Establish friendship between all specializations of StrongPtr and WeakPtr
+    template< typename KObjectT > friend class WeakPtr;
+
+
+    KObjectT*       p_;
+    DualRefCounter*   refCounter_;
 };

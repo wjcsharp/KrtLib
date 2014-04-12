@@ -10,9 +10,14 @@
 #include <stdio.h>
 #include <tchar.h>
 
-
 #include <windows.h>
 #include <fltUser.h>
+
+
+#ifndef ASSERT
+#include <assert.h>
+#define ASSERT assert
+#endif
 
 #include "ComStruct.h"
 // TODO: reference additional headers your program requires here

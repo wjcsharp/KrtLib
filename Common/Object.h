@@ -6,40 +6,88 @@
 #pragma warning(push)
 #pragma warning(disable:4100)
 
-class KBaseRefCounted
+class DualRefCounter
 {
 
+protected:
+
 public:
-    KBaseRefCounted():
-        m_strongCount(0),
-        m_weakCount(0)
+    
+    DualRefCounter(BOOLEAN strong):
+        strongCount_( strong ? 1 : 0 ),
+        weakCount_( strong ? 0 : 1)
     {
 
     }
+
+    ~DualRefCounter()
+    {
+        ASSERT( 0 == strongCount_ );
+        ASSERT( 0 == weakCount_ );
+    }
+
+    LONGLONG IncStrongCount( )
+    {
+        return InterlockedIncrement64(&strongCount_);
+    }
+
+    LONGLONG DecStrongCount()
+    {
+        return InterlockedDecrement64(&strongCount_);
+    }
+
+    LONGLONG IncWeakCount()
+    {
+        return InterlockedIncrement64(&weakCount_);
+    }
+
+    LONGLONG DecWeakCount()
+    {
+        return InterlockedDecrement64(&weakCount_);
+    }
+
+    LONGLONG GetStrongCount()
+    {
+        return strongCount_;
+    }
+
+    LONGLONG GetWeakCount()
+    {
+        return weakCount_;
+    }
+    
+protected:
+    volatile LONGLONG strongCount_;
+    volatile LONGLONG weakCount_;
+};
+
+class KBaseRefCounter
+{
+
+    KBaseRefCounter( const KBaseRefCounter& );
+    KBaseRefCounter& operator = (const KBaseRefCounter&);
+
+protected:
+    KBaseRefCounter():
+        refCount_(0)
+    {
+
+    }
+
+public:
         
-    LONGLONG IncStrongPointer()
+    LONGLONG IncrementReference()
     {
-        return InterlockedIncrement64(&m_strongCount);
+        return InterlockedIncrement64(&refCount_);
     }
 
-    LONGLONG DecStrongPointer()
+    LONGLONG DecrementReference()
     {
-        return InterlockedDecrement64(&m_strongCount);
-    }
-
-    LONGLONG IncWeakPointer()
-    {
-        return InterlockedIncrement64(&m_weakCount);
-    }
-
-    LONGLONG DecWeakPointer()
-    {
-        return InterlockedDecrement64(&m_weakCount);
+        return InterlockedDecrement64(&refCount_);
     }
 
 private:
-    volatile LONGLONG m_strongCount;
-    volatile LONGLONG m_weakCount;
+    volatile LONGLONG refCount_;
 
 };
 
@@ -48,8 +96,8 @@ class IObject
 {
 public:
     
-    virtual LONGLONG Addref(BOOLEAN strong = TRUE) = 0;
-    virtual LONGLONG Release(BOOLEAN strong = TRUE) = 0;
+    virtual LONGLONG Addref() = 0;
+    virtual LONGLONG Release() = 0;
 
 protected:
     
@@ -60,7 +108,7 @@ protected:
 
     template
     <
-        class RefCountedPolicy = KBaseRefCounted
+        class RefCountedPolicy = KBaseRefCounter
     >
     class KObjectImpl : 
         public RefCountedPolicy,
@@ -68,42 +116,30 @@ protected:
     {
         typedef RefCountedPolicy RP;
 
-    public:
 
+    protected:
         // Implement constructor
         KObjectImpl() : RP()
         {
         }
 
-        virtual LONGLONG Addref(BOOLEAN strong)
+    public:
+
+        virtual LONGLONG Addref()
         {
-            if (strong)
-            {
-                return RP::IncStrongPointer();
-            }
-            else
-            {
-                return RP::IncWeakPointer();
-            }
+            return RP::IncrementReference();
         }
 
-        virtual LONGLONG Release(BOOLEAN strong)
+        virtual LONGLONG Release()
         {
             LONGLONG lRet = 0;
-            if (strong)
+            if ( 0 == (lRet = RP::DecrementReference()))
             {
-                if ( 0 == (lRet = RP::DecStrongPointer()))
-                {
-                    delete this;
-                }
-                return lRet;
+                delete this;
             }
-            else
-            {
-                return RP::DecWeakPointer();
-            }
-        }
 
+            return lRet;
+        }
 
     };
 

@@ -4,6 +4,7 @@
 #include "stdafx.h"
 #include "../Common/Object.h"
 #include "../Common/StrongPtr.hpp"
+#include "../Common/WeakPtr.hpp"
 
 class TestDriver : 
     public KObjectImpl<>
@@ -30,18 +31,28 @@ public:
 };
 
 typedef StrongPtr<TestDriver> DriverPtr;
+typedef WeakPtr<TestDriver> DriverWeakPtr;
+
+
+void TestStrong(DriverPtr& driverPtr)
+{
+    printf("driverPtr's Data is %d \n", driverPtr->_driverId);
+    DriverPtr driverPtr2 = driverPtr;
+}
+
+void TestWeak(DriverWeakPtr& driverPtrW)
+{
+    DriverPtr driverS = driverPtrW;
+}
 
 int _tmain(int argc, _TCHAR* argv[])
 {
 
     DriverPtr driverPtr = new TestDriver();
 
-    {
-        printf("driverPtr's Data is %d \n", driverPtr->_driverId);
-        DriverPtr driverPtr2 = driverPtr;
-    }
-
-    printf("driverPtr's Data is %d \n", driverPtr->_driverId);
+    DriverWeakPtr driverWeakPtr = driverPtr;
+    
+    TestWeak(driverWeakPtr);
 
 	return 0;
 }

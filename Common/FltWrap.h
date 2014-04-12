@@ -7,7 +7,7 @@
 #else
 
 
-class KDriver : KObjectImpl<KBaseRefCounted>
+class KDriver : KObjectImpl<KBaseRefCounter>
 {
 public:
     KDriver(
