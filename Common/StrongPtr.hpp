@@ -9,7 +9,7 @@ template
     /**
     * Template parameter must support IObject interface.
     */
-        typename KObjectT
+    typename KObjectT
     >
 class StrongPtr
 {

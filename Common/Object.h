@@ -108,11 +108,12 @@ protected:
 
     template
     <
-        class RefCountedPolicy = KBaseRefCounter
+    class KTInterface,
+    class RefCountedPolicy = KBaseRefCounter
     >
     class KObjectImpl : 
-        public RefCountedPolicy,
-        public IObject
+        public virtual RefCountedPolicy,
+        public virtual KTInterface
     {
         typedef RefCountedPolicy RP;
 
