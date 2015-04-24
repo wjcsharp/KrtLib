@@ -1,82 +1,20 @@
 ﻿#pragma once
 #include "utilis.hpp"
+#include "String.back.hpp"
 
-static AtomnicInt64 _gAllocCount;
-static AtomnicInt64 _gReleaseCount;
 
-class StringOperator
-{
-public:
-    /*
-     *	RtlCopyUnicodeString and RltCopyAnsiString
-     */
-    void static CopyString(
-        _Out_ PUNICODE_STRING DestinationString,
-        _In_opt_ PCUNICODE_STRING SourceString)
-    {
-        UNALIGNED WCHAR *src, *dst;
-        ULONG n;
+static LONGLONG _gAllocCount;
+static LONGLONG _gReleaseCount;
 
-        if (ARGUMENT_PRESENT(SourceString))
-        {
-            dst = DestinationString->Buffer;
-            src = SourceString->Buffer;
-            n = SourceString->Length;
-            if ((USHORT)n > DestinationString->MaximumLength)
-            {
-                n = DestinationString->MaximumLength;
-            }
-
-            DestinationString->Length = (USHORT)n;
-            RtlCopyMemory(dst, src, n);
-            if( (DestinationString->Length + sizeof (WCHAR)) <= DestinationString->MaximumLength)
-            {
-                dst[n / sizeof(WCHAR)] = UNICODE_NULL;
-            }
-        }
-        else
-        {
-            DestinationString->Length = 0;
-        }
-
-        return;
-    }
-
-    static NTSTATUS AppendStringToString(
-        _Inout_ PUNICODE_STRING Destination,
-        _In_ PUNICODE_STRING Source)
-    {
-        USHORT n = Source->Length;
-        UNALIGNED WCHAR *dst;
-
-        if (n)
-        {
-            if ((n + Destination->Length) > Destination->MaximumLength) {
-                return( STATUS_BUFFER_TOO_SMALL );
-            }
-
-            dst = &Destination->Buffer[ (Destination->Length / sizeof( WCHAR )) ];
-            RtlMoveMemory( dst, Source->Buffer, n );
-
-            Destination->Length += n;
-
-            if( (Destination->Length + 1) < Destination->MaximumLength) {
-                dst[ n / sizeof( WCHAR ) ] = UNICODE_NULL;
-            }
-        }
-
-        return( STATUS_SUCCESS );
-    }
-};
 
 class StringAllocater
 {
 public:
 
 public:
-    static PVOID Allocate(ULONG length)
+    static PVOID Allocate(_In_ ULONG Length)
     {	
-        PVOID buf = new char[length];
+        PVOID buf = new char[Length];
         ASSERT(buf != NULL);
         if (buf != NULL)
         {
@@ -85,10 +23,10 @@ public:
         return buf;
     }
 
-    static void Release(PVOID buffer)
+    static void Release(_In_ PVOID Buffer)
     {
         ++_gReleaseCount;
-        delete[] buffer;
+        delete[] Buffer;
     }
 
     static bool IsLeaked()
@@ -98,40 +36,181 @@ public:
 };
 
 
-class UnicodeString : public UNICODE_STRING
+template<typename BaseType>
+struct NativeString
 {
+};
 
-public:
-    UnicodeString(void) :
-        _isManaged(true),
-        _refCount(NULL)
+template<>
+struct NativeString<char>: public ANSI_STRING
+{
+    NativeString()
     {
-        Buffer = NULL;
         Length = 0;
         MaximumLength = 0;
+        Buffer = 0;
+    }
+};
+
+template<>
+struct NativeString<wchar_t>: public UNICODE_STRING
+{
+    NativeString(USHORT length = 0, USHORT maxLength = 0, wchar_t* buffer = NULL)
+    {
+        Length = length;
+        MaximumLength = maxLength;
+        Buffer = buffer;
+    }
+};
+
+
+template<typename BaseType>
+class StringOperator
+{
+};
+
+template<>
+class StringOperator<wchar_t>
+{
+    typedef NativeString<wchar_t> NS;
+public:
+
+    static void InitString(_Out_ NS* destinationString, wchar_t* sourceString)
+    {
+        return RtlInitUnicodeString(destinationString, sourceString);
     }
 
-    UnicodeString(_In_ wchar_t* rhs,_In_ bool bManaged = true) :
+    static void CopyString(
+        _Out_ NS* destinationString,
+        _In_opt_ const NS* sourceString)
+    {
+        return RtlCopyUnicodeString(destinationString, sourceString);
+    }
+
+    static NTSTATUS AppendString(
+        _Inout_ NS* destination,
+        _In_ NS* source
+        )
+    {
+        return RtlAppendUnicodeStringToString(destination, source);
+    }
+
+
+    static LONG Compare(
+        _In_ NS* string1,
+        _In_ const NS* string2,
+        _In_ bool caseInSensitive
+        )
+    {
+        return RtlCompareUnicodeString(string1, string2, caseInSensitive);       
+    }
+};
+
+template<>
+class StringOperator<char>
+{
+    typedef NativeString<char> NS;
+public:
+
+    static void InitString(
+        _Out_ NS* destinationString,
+        _In_ char* sourceString)
+    {
+        return RtlInitString(destinationString, sourceString);
+    }
+
+    static void CopyString(
+        _Out_ NS* destinationString,
+        _In_opt_ const NS* sourceString)
+    {
+        return RtlCopyString(destinationString, sourceString);
+    }
+
+    static NTSTATUS AppendString(
+        _Inout_ NS* destination,
+        _In_ NS* source
+        )
+    {
+        return RtlAppendStringToString(destination, source);
+    }
+
+
+    static LONG Compare(
+        _In_ NS* string1,
+        _In_ const NS* string2,
+        _In_ bool caseInSensitive
+        )
+    {
+        return RtlCompareString(string1, string2, caseInSensitive);       
+    }
+};
+
+
+
+template<typename BaseType>
+class KString : public NativeString<BaseType>
+{
+    typedef BaseType CharType;
+    typedef NativeString<BaseType> NS;
+    typedef StringOperator<BaseType> SO;
+
+public:
+    KString(void) :
+        NS(),
+        _isManaged(false),
+        _refCount(NULL),
+    {
+    }
+
+
+    KString(
+        _In_bytecount_(initilizeLength) USHORT initLength,
+        _In_opt_ CharType* source,
+        _In_reads_bytes_(source) USHORT Length
+        ) :
+    _isManaged(true),
+        _refCount(NULL)
+    {
+        // Allocate Buffer to store given string.
+        InitRef();
+        NS ustrTemp(Length, Length + sizeof(CharType), source);
+        AllocAndCopy(initLength, &ustrTemp);
+    }
+
+    KString(
+        _In_ CharType* rhs,
+        _In_ bool bManaged = true
+        ) :
+    NS(),
         _isManaged(bManaged),
         _refCount(NULL)
     {
-        if (!_isManaged)
+        if (NULL != rhs)
         {
-            // Just use given string. Sometime it's useful in kernel mode.
-            RtlInitUnicodeString(this, rhs);
-        }
-        else
-        {
-            // Allocate buffer to store given string.
-            InitRef();
+            if (!_isManaged)
+            {
+                // Just use given string. Sometime it's useful in kernel mode.
+                SO::InitString(this, rhs);
+            }
+            else
+            {
+                // Allocate Buffer to store given string.
 
-            UNICODE_STRING ustrTemp;
-            RtlInitUnicodeString(&ustrTemp, rhs);
-            AllocAndCopy(ustrTemp.MaximumLength, &ustrTemp);
+                InitRef();
+                NS ustrTemp;
+                SO::InitString(&ustrTemp, rhs);
+                AllocAndCopy(ustrTemp.MaximumLength, &ustrTemp);
+
+            }
         }
+
     }
 
-    UnicodeString(_In_ UNICODE_STRING& rhs,_In_ bool bManaged = true) :
+    KString(
+        _In_ NS& rhs,
+        _In_ bool bManaged = true
+        ) :
+    NS(),
         _isManaged(bManaged),
         _refCount(NULL)
     {
@@ -144,57 +223,26 @@ public:
         }
         else
         {
-            // Allocate buffer to store given string.
+            // Allocate Buffer to store given string.
             InitRef();
             AllocAndCopy(rhs.MaximumLength, &rhs);
         }
     }
 
 
-    /*
-    *  Copy and assignment constructor
-    */
-    UnicodeString(_In_ const UnicodeString& rhs) :
-        _isManaged(true),
+    KString(
+        _In_ const KString& rhs
+        ) :
+    NS(),
+        _isManaged(false),
         _refCount(NULL)
     {
         if (!rhs._isManaged)
         {
             // _isManaged can only be set to false when construct with tchar*, unicode_string*
-            // if rhs cannot manage it's buffer, current string must allocate its buffer.
+            // if rhs cannot manage it's Buffer, current string must allocate its Buffer.
             InitRef();
-            AllocAndCopy(rhs.MaximumLength, const_cast<UnicodeString*>(&rhs));
-        }
-        else
-        {
-            rhs.AddRefBuf();
-            Buffer = rhs.Buffer;
-            Length = rhs.Length;
-            MaximumLength = rhs.MaximumLength;
-            _refCount = rhs._refCount;
-        }
-    }
-
-    /*
-    *  operator =
-    */
-    UnicodeString& operator=(_In_ const UnicodeString& rhs)
-    {
-        if (_refCount == rhs._refCount)
-        {
-            ASSERT(Buffer == rhs.Buffer);
-            // if current string already set to the same with rhs,
-            // just return
-            return *this;
-        }
-
-        ReleaseRef();
-        if (!rhs._isManaged)
-        {
-            // _isManaged can only be set to false when construct with tchar*, unicode_string*
-            // if rhs cannot manage it's buffer, current string must allocate its buffer.			
-            AllocAndCopy(rhs.MaximumLength, const_cast<UnicodeString*>(&rhs));
-            _isManaged = true;
+            AllocAndCopy(rhs.MaximumLength, const_cast<KString*>(&rhs));
         }
         else
         {
@@ -205,150 +253,68 @@ public:
             _refCount = rhs._refCount;
             _isManaged = rhs._isManaged;
         }
-        return *this;
     }
 
-    UnicodeString& operator=(_In_opt_z_ wchar_t* rhs)
+    /*
+    *  operators
+    */
+    KString& operator=(_In_ const KString& rhs)
     {
-        ReleaseRef();
-
-        // Allocate buffer to store given string.
+        if (_refCount != rhs._refCount)
         {
-            _isManaged = true;
-            InitRef();
-
-            UNICODE_STRING ustrTemp;
-            RtlInitUnicodeString(&ustrTemp, rhs);
-            AllocAndCopy(ustrTemp.MaximumLength, &ustrTemp);
+            ASSERT(Buffer == rhs.Buffer);
+            // if current string already set to the same with rhs,
+            // just return
+            return *this;
         }
-        return *this;
-    }
-
-    UnicodeString& operator=(_In_ UNICODE_STRING& rhs)
-    {
-        ReleaseRef();
-
-        // Allocate buffer to store given string.
+        else
         {
-            _isManaged = true;
-            InitRef();
-            AllocAndCopy(rhs.MaximumLength, &rhs);
+            KString strTemp(rhs);
+            Common::Swap<KString>(*this, strTemp);
         }
+
         return *this;
     }
 
-    /*
-    *  operator +
-    */
-    UnicodeString operator+(_In_ const UnicodeString& rhs)
+    KString operator+(_In_ const KString& rhs)
     {
-        UnicodeString strRet(*this);
-        strRet.AppendString(const_cast<UnicodeString*>(&rhs));
+        KString strRet(*this);
+        Append(rhs.Buffer, rhs.Length);
         return strRet;
     }
 
-//     friend UnicodeString operator+(_In_ const UnicodeString& lhs, _In_ const UnicodeString& rhs)
-//     {
-//         UnicodeString strRet;
-//         strRet.Reallocate((lhs.Length + rhs.Length + sizeof(wchar_t)));
-//         strRet += lhs;
-//         strRet += rhs;
-//         return strRet;
-//     }
-
-
-    UnicodeString operator+(_In_ wchar_t* rhs)
+    KString& operator+=(_In_ const KString& rhs)
     {
-        UnicodeString strRet(*this);
-        strRet.AppendString(rhs);
-        return strRet;
-    }
-
-    UnicodeString operator+(_In_ UNICODE_STRING& rhs)
-    {
-        UnicodeString strRet(*this);
-        strRet.AppendString(&rhs);
-        return strRet;
-    }
-
-    UnicodeString operator+(_In_ PUNICODE_STRING rhs)
-    {
-        UnicodeString strRet(*this);
-        strRet.AppendString(rhs);
-        return strRet;
-    }
-    /*
-    *  operator +=
-    */
-    UnicodeString& operator+=(_In_ const UnicodeString& rhs)
-    {
-        AppendString(dynamic_cast<PUNICODE_STRING>(const_cast<UnicodeString*>(&rhs)));
+        Append(rhs.Buffer, rhs.Length);
         return (*this);
     }
 
-    UnicodeString& operator+=(_In_ wchar_t* rhs)
+    bool operator ==(_In_ const KString& rhs)
     {
-        AppendString(const_cast<wchar_t*>(rhs));
-        return (*this);
+        return (SO::Compare(this, &rhs, false) == 0);
     }
 
-    UnicodeString& operator+=(_In_ UNICODE_STRING& rhs)
+    bool operator !=(_In_ const KString& rhs)
     {
-        AppendString(&rhs);
-        return (*this);
-    }
-    
-    UnicodeString& operator+=(_In_ PUNICODE_STRING rhs)
-    {
-        AppendString(rhs);
-        return (*this);
-    }
-    
-    /*
-    *
-    */
-    bool operator ==(_In_ const wchar_t* rhs)
-    {
-        return (0 == wcscmp(Buffer, rhs));
+        return (SO::Compare(this, &rhs, false) != 0);
     }
 
     /*
     *  Release
     */
-    ~UnicodeString()
+    ~KString()
     {
         ReleaseRef();
     }
-
-    /*
-     *	Reallocate,
-     *  @param: nLength is the memory length, but not the string length
-     */
-    void Reallocate(_In_ int nLength)
-    {
-        ReleaseRef();
-        InitRef();
-        
-        Buffer = (wchar_t*)StringAllocater::Allocate(nLength);
-        if (NULL == Buffer)
-        {
-            ASSERT(Buffer);
-            return;
-        }
-        this->Length = 0;
-        this->MaximumLength = (USHORT)nLength;
-        this->_isManaged = true;
-    }
-
 
 private:
 
     /*
     *	Allocate and initialize Buffer
     */
-    NTSTATUS AllocAndCopy(int length, PUNICODE_STRING strSrc)
+    NTSTATUS AllocAndCopy(_In_bytecount_(allocate) ULONG Length,_In_opt_ NS* strSrc)
     {
-        Buffer = (wchar_t*)StringAllocater::Allocate(length);
+        Buffer = (CharType*)StringAllocater::Allocate(Length);
         ASSERT(Buffer != NULL);
         if (Buffer == NULL)
         {
@@ -356,41 +322,49 @@ private:
         }
 
         this->_isManaged = true;
-        this->MaximumLength = (USHORT)length;
+        this->MaximumLength = (USHORT)Length;
 
-        StringOperator::CopyString(this, strSrc);
+        if (NULL != strSrc)
+        {
+            SO::CopyString(this, strSrc);
+        }
         return STATUS_SUCCESS;
     }
 
-    ULONG AppendString(_In_ PUNICODE_STRING rhs)
+    NTSTATUS Alloc(_In_bytecount_(allocate) ULONG Length)
     {
-        NTSTATUS status = STATUS_UNSUCCESSFUL;
-        // check current allocated max length
-        if (this->Length + rhs->Length + sizeof(wchar_t)> this->MaximumLength)
+        Buffer = (CharType*)StringAllocater::Allocate(Length);
+        ASSERT(Buffer != NULL);
+        if (Buffer == NULL)
         {
-            UnicodeString strTemp;
-            strTemp.InitRef();
-            status = strTemp.AllocAndCopy(this->Length + rhs->Length + sizeof(wchar_t), this);            
-            if (!NT_SUCCESS(status))
-            {
-                return status;
-            }
-
-            Common::Swap<UnicodeString>(*this, strTemp);
+            return STATUS_INSUFFICIENT_RESOURCES;
         }
 
-        status = StringOperator::AppendStringToString(this, rhs);
+        this->_isManaged = true;
+        this->MaximumLength = (USHORT)Length;
+
+        return STATUS_SUCCESS;
+    }
+
+    NTSTATUS Append(_In_ CharType* strSrc,_In_reads_bytes_(strSrc) USHORT Length)
+    {
+        NTSTATUS status = STATUS_UNSUCCESSFUL;
+        bool bNeedAlloc = false;
+
+        // check current allocated max Length
+        USHORT needLength = this->Length + Length + sizeof(CharType);
+        if (IsShared() ||
+            ( needLength > this->MaximumLength)
+            )
+        {
+            KString strTemp(needLength, Buffer, this->Length);
+            Common::Swap<KString>(*this, strTemp);
+        }
+
+        NS sourth(Length, Length+sizeof(CharType), strSrc);
+        status = SO::AppendString(this, &sourth);
         return status;
     }
-
-    ULONG AppendString(_In_ wchar_t* strSrc)
-    {
-        UNICODE_STRING strTemp = {0};
-        RtlInitUnicodeString(&strTemp, strSrc);
-        return AppendString(&strTemp);
-    }
-
-   
 
     /*
     *	reference count related
@@ -445,6 +419,15 @@ private:
         return 0;
     }
 
+    bool IsShared()
+    {
+        if (_refCount)
+        {
+            return((*_refCount)-1 > 0);
+        }
+        return true;
+    }
+
 public:
 
     // whether the Buffer is can be managed
@@ -452,3 +435,9 @@ public:
     AtomnicInt32* _refCount;
 
 };
+
+typedef NativeString<char>      NStringA;
+typedef KString<char>           StringA;
+
+typedef NativeString<wchar_t>   NStringW;
+typedef KString<wchar_t>        StringW;
